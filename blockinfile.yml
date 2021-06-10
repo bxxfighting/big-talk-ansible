@@ -1,0 +1,42 @@
+----
+- hosts: all
+  remote_user: root
+  gather_facts: false
+  vars:
+    namespace: "{{ namespace }}"
+    domain_list: "{{ domains.split(',') }}"
+    ip: "{{ ingress_controller_nginx_ip }}"
+    tpl_src_path: "{{ tpl_src_path }}"
+    dest_base_path: "/var/named/view/{{ namespace }}"
+
+  tasks:
+  - name: "判断文件是否存在"
+    command: "ls {{ dest_base_path }}"
+
+  - name: "插入view信息"
+    blockinfile:
+      path: "/var/named/zone/{{ namespace }}.conf"
+      insertafter: "^view +?\"view_{{ namespace }}\" +?{"
+      marker: "// {mark} {{ domain }}"
+      block: |
+        zone  "{{ domain }}" {
+            type master;
+            file "/var/named/view/{{ namespace }}/{{ domain }}";
+        };
+    loop: "{{ domain_list }}"
+    loop_control:
+      loop_var: domain
+
+  - name: "生成解析记录"
+    template:
+      src: "{{ tpl_src_path }}"
+      dest: "{{ dest_base_path }}/{{ domain }}"
+    loop: "{{ domain_list }}"
+    loop_control:
+      loop_var: domain
+    register: result
+
+  - name: "重启DNS服务"
+    when: result.changed == True
+    shell:
+      cmd: "/etc/init.d/named restart"
